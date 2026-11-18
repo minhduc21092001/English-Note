@@ -15,6 +15,23 @@ const IMAGE_TYPES: Record<string, string> = {
 };
 const MAX_IMAGE = 8 * 1024 * 1024;
 
+// Create the table on first use, so a fresh deploy needs no separate migration step (schema.sql mirrors this).
+let schemaReady: Promise<unknown> | null = null;
+function ensureSchema(db: D1Database): Promise<unknown> {
+  schemaReady ??= db
+    .batch([
+      db.prepare(
+        "CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL, category TEXT NOT NULL DEFAULT '', excerpt TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', published INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')))",
+      ),
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_posts_pub ON posts (published, created_at DESC)'),
+    ])
+    .catch((e) => {
+      schemaReady = null;
+      throw e;
+    });
+  return schemaReady;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -22,6 +39,8 @@ export default {
     const method = request.method;
 
     try {
+      await ensureSchema(env.DB);
+
       // ---------- API ----------
       if (pathname.startsWith('/api/')) return await handleApi(request, env, url);
 

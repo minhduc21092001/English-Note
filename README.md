@@ -18,9 +18,7 @@ npm run dev               # http://localhost:8787  (admin: /admin/)
 
 ```
 npx wrangler login
-npx wrangler d1 create english-blog            # copy database_id into wrangler.jsonc
-npx wrangler r2 bucket create english-blog-media
-npm run db:init:remote
+# (D1 and R2 are created automatically on the first deploy - no IDs needed)
 npm run deploy
 ```
 

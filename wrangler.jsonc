@@ -8,17 +8,7 @@
     "binding": "ASSETS",
     "run_worker_first": true
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "english-blog",
-      "database_id": "REPLACE_WITH_YOUR_D1_ID"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MEDIA",
-      "bucket_name": "english-blog-media"
-    }
-  ]
+  // No IDs on purpose: Wrangler creates the D1 database and R2 bucket on first deploy.
+  "d1_databases": [{ "binding": "DB" }],
+  "r2_buckets": [{ "binding": "MEDIA" }]
 }

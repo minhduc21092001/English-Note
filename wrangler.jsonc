@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "english-blog",
+  "name": "english-note-13219",
   "main": "src/worker/index.ts",
   // Builds the admin editor into ./dist before every deploy, so no separate "Build command" is needed.
   "build": { "command": "npm run build:admin" },
@@ -10,7 +10,15 @@
     "binding": "ASSETS",
     "run_worker_first": true
   },
-  // No IDs on purpose: Wrangler creates the D1 database and R2 bucket on first deploy.
-  "d1_databases": [{ "binding": "DB" }],
-  "r2_buckets": [{ "binding": "MEDIA" }]
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "english-note-13219-db",
+      "database_id": "1e9cd92c-dfa2-4fc6-a351-fe966138f364",
+      // Keeps the local dev database (npm run dev) separate from the production one.
+      "preview_database_id": "REPLACE_WITH_YOUR_D1_ID"
+    }
+  ],
+  // Create this bucket once in the dashboard (R2 -> Create bucket) with exactly this name.
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "english-note-media" }]
 }

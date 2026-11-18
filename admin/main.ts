@@ -105,13 +105,28 @@ async function showList() {
 const DEFAULT_CATEGORIES = ['Grammar', 'Vocabulary', 'Phrasal Verbs', 'Writing'];
 
 const FONT_SIZES = ['12', '14', '16', '18', '20', '24', '28', '32', '36', '48'];
+/** Name of the font the page really uses by default (first installed font of the CSS stack in site.css). */
+function detectDefaultFont(): string {
+  const ctx = document.createElement('canvas').getContext('2d')!;
+  const probe = 'mmmmmmmmmmlli1WwOo0';
+  const width = (f: string) => { ctx.font = `72px ${f}`; return ctx.measureText(probe).width; };
+  const bases = ['monospace', 'serif', 'sans-serif'];
+  const baseW = bases.map(width);
+  const installed = (name: string) => bases.some((b, i) => width(`"${name}", ${b}`) !== baseW[i]);
+  for (const n of ['Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial']) if (installed(n)) return n;
+  return 'System UI';
+}
+const DEFAULT_SIZE = '18px'; // = .prose font-size in site.css
+
 const FONT_FAMILIES: [string, string][] = [
-  ['Default', ''],
+  ['', ''], // label filled in with detectDefaultFont()
   ['Arial', 'Arial, Helvetica, sans-serif'],
   ['Verdana', 'Verdana, Geneva, sans-serif'],
   ['Georgia', 'Georgia, serif'],
   ['Times New Roman', '"Times New Roman", Times, serif'],
   ['Courier New', '"Courier New", Courier, monospace'],
+  ['Handwriting (Excalidraw)', 'Excalifont, "Segoe Print", "Comic Sans MS", cursive'],
+  ['Handwriting (Tiếng Việt)', '"Patrick Hand", "Segoe Print", "Comic Sans MS", cursive'],
 ];
 
 const PALETTE: string[][] = [
@@ -181,10 +196,9 @@ function toolbarHtml() {
           <option value="4">Heading 4</option>
         </select>
         <select data-sel="family" title="Font" class="sel-family">
-          ${FONT_FAMILIES.map(([n, v]) => `<option value="${esc(v)}">${n}</option>`).join('')}
+          ${FONT_FAMILIES.map(([n, v], i) => `<option value="${esc(v)}">${i === 0 ? esc(detectDefaultFont()) : n}</option>`).join('')}
         </select>
         <select data-sel="size" title="Font size" class="sel-size">
-          <option value="">Size</option>
           ${FONT_SIZES.map((s) => `<option value="${s}px">${s}</option>`).join('')}
         </select>
       </span>
@@ -399,7 +413,7 @@ function showEditor(post: Post | null) {
   // After a formatting action, drop the highlight (collapse the selection to its end), like closing a Word menu.
   const deselect = () => {
     const sel = editor.state.selection;
-    if (sel instanceof TextSelection && !sel.empty) editor.commands.setTextSelection(sel.to);
+    if (sel instanceof TextSelection && !sel.empty) editor.chain().focus().setTextSelection(sel.to).run();
   };
   const KEEP_SELECTION = new Set(['imgW25', 'imgW50', 'imgW75', 'imgW100', 'imgOrig', 'imgCrop', 'undo', 'redo', 'image', 'table', 'addColAfter', 'addRowAfter', 'deleteColumn', 'deleteRow', 'toggleHeaderRow', 'mergeOrSplit', 'deleteTable']);
   const run = (cmd: string) => {
@@ -465,8 +479,9 @@ function showEditor(post: Post | null) {
           else c.setHeading({ level: Number(v) as 1 | 2 | 3 | 4 }).run();
           break;
         case 'family': v ? c.setFontFamily(v).run() : c.unsetFontFamily().run(); break;
-        case 'size': v ? c.setFontSize(v).run() : c.unsetFontSize().run(); break;
+        case 'size': v === DEFAULT_SIZE ? c.unsetFontSize().run() : c.setFontSize(v).run(); break;
       }
+      t.blur(); // otherwise Chrome gives focus back to the <select> and the highlight stays
       deselect();
     } else if (t.dataset.color === 'text' || t.dataset.color === 'highlight') {
       closePalettes();
@@ -502,14 +517,23 @@ function showEditor(post: Post | null) {
     const ts = editor.getAttributes('textStyle');
     const setSel = (name: string, value: string) => {
       const sel = toolbar.querySelector<HTMLSelectElement>(`select[data-sel="${name}"]`)!;
-      sel.value = [...sel.options].some((o) => o.value === value) ? value : '';
-      if (name === 'block' && sel.value === '') sel.value = 'p';
+      sel.querySelector('option[data-temp]')?.remove();
+      if (![...sel.options].some((o) => o.value === value)) {
+        if (name === 'block' || !value) value = name === 'block' ? 'p' : '';
+        else { // an uncommon size/font: show exactly what is used
+          const o = document.createElement('option');
+          o.value = value; o.dataset.temp = '1';
+          o.textContent = name === 'size' ? parseFloat(value) + '' : value.split(',')[0].replace(/["']/g, '');
+          sel.appendChild(o);
+        }
+      }
+      sel.value = value;
     };
     let block = 'p';
     for (let l = 1; l <= 4; l++) if (editor.isActive('heading', { level: l })) block = String(l);
     setSel('block', block);
     setSel('family', (ts.fontFamily as string) ?? '');
-    setSel('size', (ts.fontSize as string) ?? '');
+    setSel('size', (ts.fontSize as string) ?? DEFAULT_SIZE);
     $('table-tools').classList.toggle('show', editor.isActive('table'));
     $('image-tools').classList.toggle('show', editor.isActive('image'));
     toolbar.querySelector<HTMLButtonElement>('[data-cmd=undo]')!.disabled = !editor.can().undo();
@@ -593,7 +617,13 @@ function showEditor(post: Post | null) {
   document.addEventListener('keydown', onKey);
   function onKey(e: KeyboardEvent) {
     if (!document.getElementById('editor')) { document.removeEventListener('keydown', onKey); return; }
-    if (e.key === 'Escape') { closePalettes(); deselect(); return; }
+    if (e.key === 'Escape') {
+      closePalettes();
+      const a = document.activeElement;
+      const typing = a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement; // title, slug, category…
+      if (!typing) deselect();
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
   }
 

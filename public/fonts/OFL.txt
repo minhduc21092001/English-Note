@@ -1,0 +1,14 @@
+Excalifont
+Copyright (c) 2024 by Excalidraw. All rights reserved.
+Based on Virgil by Your Own Font Foundry; modifications by Ján Filípek / DizajnDesign.
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+Full license text and FAQ: https://openfontlicense.org  (https://scripts.sil.org/OFL)
+Source: https://github.com/excalidraw/excalidraw/tree/master/packages/excalidraw/fonts/Excalifont
+
+----------------------------------------------------------------
+
+Patrick Hand
+Copyright (c) 2010-2012 by Patrick Wagesreiter (mail@patrickwagesreiter.at), with Reserved Font Name "Patrick Hand".
+Licensed under the SIL Open Font License, Version 1.1: https://openfontlicense.org
+Source: https://fonts.google.com/specimen/Patrick+Hand

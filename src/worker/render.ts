@@ -138,7 +138,6 @@ export function renderHome(folders: Folder[], recent: PostRow[]): string {
     `<section class="hero">
   <p class="hero-kicker">my learning journal</p>
   <h1>English Notes</h1>
-  <p class="hero-sub">Grammar, vocabulary and little discoveries from my journey of learning English.</p>
 </section>
 <div class="section-head"><h2>Folders</h2></div>
 ${grid}

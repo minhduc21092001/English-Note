@@ -295,7 +295,8 @@ function showEditor(post: Post | null) {
       Placeholder.configure({ placeholder: 'Start writing your post…' }),
     ],
     editorProps: {
-      attributes: { class: 'prose', spellcheck: 'false' },
+      // spellcheck/autocorrect off; data-* attributes also switch off Grammarly / LanguageTool-style extensions.
+      attributes: { class: 'prose', spellcheck: 'false', autocorrect: 'off', autocapitalize: 'off', 'data-gramm': 'false', 'data-gramm_editor': 'false', 'data-enable-grammarly': 'false', 'data-lt-active': 'false' },
       // Pasted text must not drag in the source page's fonts/sizes: the font only changes when you pick one.
       transformPastedHTML: (html: string) => {
         const doc = new DOMParser().parseFromString(html, 'text/html');

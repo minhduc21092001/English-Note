@@ -2,6 +2,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "english-blog",
   "main": "src/worker/index.ts",
+  // Builds the admin editor into ./dist before every deploy, so no separate "Build command" is needed.
+  "build": { "command": "npm run build:admin" },
   "compatibility_date": "2026-11-01",
   "assets": {
     "directory": "./dist",

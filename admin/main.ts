@@ -167,6 +167,7 @@ const ICON = {
   image: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5L8 19"/>'),
   table: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>'),
   hr: svg('<path d="M3 12h18" stroke-width="2.4"/><path d="M8 6h8M8 18h8" opacity=".45"/>'),
+  draw: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
   clear: svg('<path d="M5 5h11M10.5 5v11"/><path d="m14 14 6 6M20 14l-6 6"/>'),
 };
 
@@ -212,7 +213,7 @@ function toolbarHtml() {
     <div class="tr">
       <span class="tg">${tb('alignLeft', alignIcon('left'), 'Align left (Ctrl+Shift+L)')}${tb('alignCenter', alignIcon('center'), 'Center (Ctrl+Shift+E)')}${tb('alignRight', alignIcon('right'), 'Align right (Ctrl+Shift+R)')}${tb('alignJustify', alignIcon('justify'), 'Justify (Ctrl+Shift+J) – click again to turn off')}</span>
       <span class="tg">${tb('bulletList', ICON.bullet, 'Bulleted list')}${tb('orderedList', ICON.ordered, 'Numbered list')}${tb('blockquote', ICON.quote, 'Quote')}</span>
-      <span class="tg">${tb('link', ICON.link, 'Insert / edit link')}${tb('image', ICON.image, 'Insert image')}${tb('table', ICON.table, 'Insert table')}${tb('hr', ICON.hr, 'Horizontal line')}</span>
+      <span class="tg">${tb('link', ICON.link, 'Insert / edit link')}${tb('image', ICON.image, 'Insert image')}${tb('table', ICON.table, 'Insert table')}${tb('hr', ICON.hr, 'Horizontal line')}${tb('draw', ICON.draw, 'Draw a diagram or sketch (Excalidraw)')}</span>
       <span class="tg">${tb('clear', ICON.clear, 'Clear formatting')}</span>
     </div>
     <div class="table-tools" id="table-tools">
@@ -226,7 +227,7 @@ function toolbarHtml() {
       <span class="lbl">Image:</span>
       ${tb('imgW25', '25%', 'Resize to 25% of the page width')}${tb('imgW50', '50%', 'Resize to 50% of the page width')}${tb('imgW75', '75%', 'Resize to 75% of the page width')}${tb('imgW100', '100%', 'Full page width')}${tb('imgOrig', 'Original size', 'Original pixel size')}
       <span class="sep"></span>
-      ${tb('imgCrop', '✂ Crop…', 'Crop this image')}
+      ${tb('imgCrop', '✂ Crop…', 'Crop this image')}${tb('imgEdit', '✎ Edit drawing', 'Re-open this drawing in the drawing tool')}
       <span class="lbl">Tip: drag the handles on the image corners to resize freely.</span>
     </div>`;
 }
@@ -365,6 +366,44 @@ function showEditor(post: Post | null) {
       setStatus((e as Error).message, true);
     }
   };
+  const drawingTool = async (initial?: Blob) => {
+    setStatus('Loading drawing tool…');
+    try {
+      return await (await import('./drawing')).openDrawing(initial);
+    } finally {
+      setStatus(dirty ? 'Unsaved changes' : '');
+    }
+  };
+  const uploadDrawing = async (blob: Blob) => {
+    setStatus('Uploading drawing…');
+    return uploadImage(new File([blob], 'drawing.png', { type: 'image/png' }));
+  };
+  const insertDrawing = async () => {
+    try {
+      const res = await drawingTool();
+      if (!res) return;
+      const src = await uploadDrawing(res.blob);
+      editor.chain().focus().setImage({ src, alt: 'Drawing', width: res.width, height: res.height }).run();
+      markDirty();
+    } catch (e) {
+      setStatus((e as Error).message, true);
+    }
+  };
+  const editDrawing = async () => {
+    const current = editor.getAttributes('image').src as string | undefined;
+    if (!current) return;
+    try {
+      const res = await drawingTool(await (await fetch(current)).blob());
+      if (!res) return;
+      const src = await uploadDrawing(res.blob);
+      editor.chain().focus().updateAttributes('image', { src, width: res.width, height: res.height }).run();
+      const live = selectedImg();
+      if (live) { live.style.width = res.width + 'px'; live.style.height = res.height + 'px'; }
+      markDirty();
+    } catch (e) {
+      setStatus((e as Error).message, true);
+    }
+  };
   const runRaw = (cmd: string) => {
     const c = editor.chain().focus();
     switch (cmd) {
@@ -391,6 +430,8 @@ function showEditor(post: Post | null) {
       case 'imgW100': return resizeImage(1);
       case 'imgOrig': return resizeImage(null);
       case 'imgCrop': return cropImage();
+      case 'imgEdit': return editDrawing();
+      case 'draw': return insertDrawing();
       case 'table': return c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
       case 'addColAfter': return c.addColumnAfter().run();
       case 'addRowAfter': return c.addRowAfter().run();
@@ -415,7 +456,7 @@ function showEditor(post: Post | null) {
     const sel = editor.state.selection;
     if (sel instanceof TextSelection && !sel.empty) editor.chain().focus().setTextSelection(sel.to).run();
   };
-  const KEEP_SELECTION = new Set(['imgW25', 'imgW50', 'imgW75', 'imgW100', 'imgOrig', 'imgCrop', 'undo', 'redo', 'image', 'table', 'addColAfter', 'addRowAfter', 'deleteColumn', 'deleteRow', 'toggleHeaderRow', 'mergeOrSplit', 'deleteTable']);
+  const KEEP_SELECTION = new Set(['draw', 'imgEdit', 'imgW25', 'imgW50', 'imgW75', 'imgW100', 'imgOrig', 'imgCrop', 'undo', 'redo', 'image', 'table', 'addColAfter', 'addRowAfter', 'deleteColumn', 'deleteRow', 'toggleHeaderRow', 'mergeOrSplit', 'deleteTable']);
   const run = (cmd: string) => {
     const r = runRaw(cmd);
     if (!KEEP_SELECTION.has(cmd)) deselect();
@@ -617,6 +658,7 @@ function showEditor(post: Post | null) {
   document.addEventListener('keydown', onKey);
   function onKey(e: KeyboardEvent) {
     if (!document.getElementById('editor')) { document.removeEventListener('keydown', onKey); return; }
+    if (document.querySelector('.dr-overlay')) return; // the drawing tool handles its own keys
     if (e.key === 'Escape') {
       closePalettes();
       const a = document.activeElement;

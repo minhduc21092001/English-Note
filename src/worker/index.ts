@@ -1,4 +1,4 @@
-import { renderHome, renderNotFound, renderPost } from './render';
+import { buildFolders, categoryKey, renderFolder, renderHome, renderNotFound, renderPost } from './render';
 import type { Env, PostRow } from './types';
 
 const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
@@ -58,13 +58,19 @@ export default {
 
       // ---------- Public pages ----------
       if (method === 'GET' || method === 'HEAD') {
-        if (pathname === '/') {
+        if (pathname === '/' || pathname.startsWith('/folder/')) {
+          // A personal blog is small, so group the published posts into folders in code.
           const { results } = await env.DB
             .prepare(
-              "SELECT id, slug, title, category, excerpt, published, created_at, updated_at, '' AS content FROM posts WHERE published = 1 ORDER BY created_at DESC LIMIT 100",
+              "SELECT id, slug, title, category, excerpt, published, created_at, updated_at, '' AS content FROM posts WHERE published = 1 ORDER BY created_at DESC LIMIT 1000",
             )
             .all<PostRow>();
-          return html(renderHome(results));
+          if (pathname === '/') return html(renderHome(buildFolders(results), results.slice(0, 6)));
+
+          const key = decodeURIComponent(pathname.slice('/folder/'.length).replace(/\/$/, ''));
+          const posts = results.filter((p) => categoryKey(p.category) === key);
+          const folder = buildFolders(posts)[0];
+          return folder ? html(renderFolder(folder, posts)) : html(renderNotFound(), 404);
         }
         const m = pathname.match(/^\/post\/([^/]+)\/?$/);
         if (m) {

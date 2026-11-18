@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/worker"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
     "@tiptap/core": "^3.34.0",
     "@tiptap/extension-highlight": "^3.34.0",
     "@tiptap/extension-image": "^3.34.0",
@@ -20,10 +21,14 @@
     "@tiptap/extension-text-align": "^3.34.0",
     "@tiptap/extension-text-style": "^3.34.0",
     "@tiptap/pm": "^3.34.0",
-    "@tiptap/starter-kit": "^3.34.0"
+    "@tiptap/starter-kit": "^3.34.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261118.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "wrangler": "^4.164.0"

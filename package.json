@@ -1,0 +1,31 @@
+{
+  "name": "english-blog",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run build:admin && wrangler dev",
+    "dev:admin": "vite",
+    "build:admin": "vite build",
+    "db:init:local": "wrangler d1 execute english-blog --local --file=./schema.sql",
+    "db:init:remote": "wrangler d1 execute english-blog --remote --file=./schema.sql",
+    "deploy": "npm run build:admin && wrangler deploy",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/worker"
+  },
+  "dependencies": {
+    "@tiptap/core": "^3.34.0",
+    "@tiptap/extension-highlight": "^3.34.0",
+    "@tiptap/extension-image": "^3.34.0",
+    "@tiptap/extension-placeholder": "^3.34.0",
+    "@tiptap/extension-table": "^3.34.0",
+    "@tiptap/extension-text-align": "^3.34.0",
+    "@tiptap/extension-text-style": "^3.34.0",
+    "@tiptap/pm": "^3.34.0",
+    "@tiptap/starter-kit": "^3.34.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261118.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "wrangler": "^4.164.0"
+  }
+}

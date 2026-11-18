@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npm run build:admin && wrangler dev",
+    "dev": "wrangler dev",
     "dev:admin": "vite",
     "build:admin": "vite build",
     "db:init:local": "wrangler d1 execute english-blog --local --file=./schema.sql",

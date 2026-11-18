@@ -122,10 +122,10 @@ a.chip:hover { background: color-mix(in srgb, var(--c) 22%, #fff); }
 }
 
 /* ---------- Rich text content (public posts + editor) ---------- */
-.prose { font-size: 18px; line-height: 1.75; overflow-wrap: anywhere; }
+.prose { font-family: "Patrick Hand", "Segoe UI", Roboto, Arial, sans-serif; font-size: 20px; line-height: 1.7; overflow-wrap: anywhere; }
 .prose > :first-child { margin-top: 0; }
 .prose p { margin: 0 0 1em; }
-.prose h1, .prose h2, .prose h3, .prose h4 { font-family: Georgia, serif; line-height: 1.25; margin: 1.6em 0 .5em; }
+.prose h1, .prose h2, .prose h3, .prose h4 { font-family: inherit; line-height: 1.25; margin: 1.6em 0 .5em; }
 .prose h1 { font-size: 2em; }
 .prose h2 { font-size: 1.5em; }
 .prose h3 { font-size: 1.25em; }
@@ -147,5 +147,5 @@ a.chip:hover { background: color-mix(in srgb, var(--c) 22%, #fff); }
 
 @media (max-width: 600px) {
   .post-title { font-size: 1.8rem; }
-  .prose { font-size: 17px; }
+  .prose { font-size: 18px; }
 }

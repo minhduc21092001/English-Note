@@ -7,7 +7,8 @@ export default defineConfig({
   base: '/',
   build: {
     outDir: 'dist',
-    emptyOutDir: true,
+    // false: `wrangler dev` runs this build too and watches ./dist; wiping the folder confused its asset watcher.
+    emptyOutDir: false,
     rollupOptions: { input: 'admin/index.html' },
   },
   server: {

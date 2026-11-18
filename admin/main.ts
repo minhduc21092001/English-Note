@@ -19,6 +19,7 @@ interface PostSummary { id: number; slug: string; title: string; category: strin
 interface Post extends PostSummary { excerpt: string; content: string }
 
 const app = document.getElementById('app')!;
+app.spellcheck = false; // no red squiggly underlines
 
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -105,28 +106,18 @@ async function showList() {
 const DEFAULT_CATEGORIES = ['Grammar', 'Vocabulary', 'Phrasal Verbs', 'Writing'];
 
 const FONT_SIZES = ['12', '14', '16', '18', '20', '24', '28', '32', '36', '48'];
-/** Name of the font the page really uses by default (first installed font of the CSS stack in site.css). */
-function detectDefaultFont(): string {
-  const ctx = document.createElement('canvas').getContext('2d')!;
-  const probe = 'mmmmmmmmmmlli1WwOo0';
-  const width = (f: string) => { ctx.font = `72px ${f}`; return ctx.measureText(probe).width; };
-  const bases = ['monospace', 'serif', 'sans-serif'];
-  const baseW = bases.map(width);
-  const installed = (name: string) => bases.some((b, i) => width(`"${name}", ${b}`) !== baseW[i]);
-  for (const n of ['Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial']) if (installed(n)) return n;
-  return 'System UI';
-}
-const DEFAULT_SIZE = '18px'; // = .prose font-size in site.css
+const DEFAULT_SIZE = '20px'; // = .prose font-size in site.css
 
+/** First entry (empty value) = the default font of posts, set in site.css (.prose). Other fonts are applied only when chosen. */
 const FONT_FAMILIES: [string, string][] = [
-  ['', ''], // label filled in with detectDefaultFont()
+  ['Handwriting (Tiếng Việt)', ''],
+  ['Handwriting (Excalidraw)', 'Excalifont, "Segoe Print", "Comic Sans MS", cursive'],
+  ['Segoe UI', '"Segoe UI", Roboto, Arial, sans-serif'],
   ['Arial', 'Arial, Helvetica, sans-serif'],
   ['Verdana', 'Verdana, Geneva, sans-serif'],
   ['Georgia', 'Georgia, serif'],
   ['Times New Roman', '"Times New Roman", Times, serif'],
   ['Courier New', '"Courier New", Courier, monospace'],
-  ['Handwriting (Excalidraw)', 'Excalifont, "Segoe Print", "Comic Sans MS", cursive'],
-  ['Handwriting (Tiếng Việt)', '"Patrick Hand", "Segoe Print", "Comic Sans MS", cursive'],
 ];
 
 const PALETTE: string[][] = [
@@ -197,7 +188,7 @@ function toolbarHtml() {
           <option value="4">Heading 4</option>
         </select>
         <select data-sel="family" title="Font" class="sel-family">
-          ${FONT_FAMILIES.map(([n, v], i) => `<option value="${esc(v)}">${i === 0 ? esc(detectDefaultFont()) : n}</option>`).join('')}
+          ${FONT_FAMILIES.map(([n, v]) => `<option value="${esc(v)}">${n}</option>`).join('')}
         </select>
         <select data-sel="size" title="Font size" class="sel-size">
           ${FONT_SIZES.map((s) => `<option value="${s}px">${s}</option>`).join('')}
@@ -304,7 +295,18 @@ function showEditor(post: Post | null) {
       Placeholder.configure({ placeholder: 'Start writing your post…' }),
     ],
     editorProps: {
-      attributes: { class: 'prose' },
+      attributes: { class: 'prose', spellcheck: 'false' },
+      // Pasted text must not drag in the source page's fonts/sizes: the font only changes when you pick one.
+      transformPastedHTML: (html: string) => {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        doc.body.querySelectorAll<HTMLElement>('[style]').forEach((el) => {
+          el.style.removeProperty('font');
+          el.style.removeProperty('font-family');
+          el.style.removeProperty('font-size');
+        });
+        doc.body.querySelectorAll('font').forEach((f) => { f.removeAttribute('face'); f.removeAttribute('size'); });
+        return doc.body.innerHTML;
+      },
       handlePaste: (_v, e) => {
         const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'));
         if (!files.length) return false;
@@ -573,8 +575,9 @@ function showEditor(post: Post | null) {
     let block = 'p';
     for (let l = 1; l <= 4; l++) if (editor.isActive('heading', { level: l })) block = String(l);
     setSel('block', block);
-    setSel('family', (ts.fontFamily as string) ?? '');
-    setSel('size', (ts.fontSize as string) ?? DEFAULT_SIZE);
+    const fam = (ts.fontFamily as string | undefined) ?? '';
+    setSel('family', /^"?Patrick Hand/.test(fam) ? '' : fam); // Patrick Hand is the default font
+    setSel('size', (ts.fontSize as string) || DEFAULT_SIZE);
     $('table-tools').classList.toggle('show', editor.isActive('table'));
     $('image-tools').classList.toggle('show', editor.isActive('image'));
     toolbar.querySelector<HTMLButtonElement>('[data-cmd=undo]')!.disabled = !editor.can().undo();

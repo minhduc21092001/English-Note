@@ -24,6 +24,7 @@ function layout(title: string, body: string, description = '', wide = false): st
 <title>${esc(title)}</title>
 ${description ? `<meta name="description" content="${esc(description)}">` : ''}
 <link rel="stylesheet" href="/site.css">
+<script src="/folder-colors.js" defer></script>
 </head>
 <body class="site">
 <header class="site-header"><div class="wrap${w}">
@@ -85,8 +86,25 @@ function paletteFor(key: string): [string, string] {
   return PALETTES[h % PALETTES.length];
 }
 
+// Colours the owner picked (right-click a folder); set by the Worker right before rendering a page.
+let COLORS: Record<string, string> = {};
+export function setFolderColors(c: Record<string, string>) {
+  COLORS = c;
+}
+/** A darker shade of a pastel colour, used for the back of the folder. Same maths as public/folder-colors.js. */
+function darken(hex: string, f = 0.8): string {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = (v: number) => Math.round(v * f).toString(16).padStart(2, '0');
+  return `#${ch((n >> 16) & 255)}${ch((n >> 8) & 255)}${ch(n & 255)}`;
+}
+
 /** CSS custom properties (colours) for a folder, usable on any element. */
 const colorVars = (key: string) => {
+  const custom = COLORS[key];
+  if (custom) {
+    const back = darken(custom);
+    return `--back:${back};--front:${custom};--c:${back}`;
+  }
   const [back, front] = paletteFor(key);
   return `--back:${back};--front:${front};--c:${back}`;
 };
@@ -103,8 +121,8 @@ function chip(category: string, link = true): string {
   const key = categoryKey(category);
   const name = key === OTHER_KEY ? OTHER_NAME : category.trim();
   return link
-    ? `<a class="chip" style="${colorVars(key)}" href="${folderUrl(key)}">${esc(name)}</a>`
-    : `<span class="chip" style="${colorVars(key)}">${esc(name)}</span>`;
+    ? `<a class="chip" data-folder="${esc(key)}" style="${colorVars(key)}" href="${folderUrl(key)}">${esc(name)}</a>`
+    : `<span class="chip" data-folder="${esc(key)}" style="${colorVars(key)}">${esc(name)}</span>`;
 }
 
 function postRow(p: PostRow): string {
@@ -122,7 +140,7 @@ export function renderHome(folders: Folder[], recent: PostRow[]): string {
   const grid = folders.length
     ? `<div class="folders">${folders
         .map(
-          (f) => `<a class="folder" style="${colorVars(f.key)}" href="${folderUrl(f.key)}">
+          (f) => `<a class="folder" data-folder="${esc(f.key)}" style="${colorVars(f.key)}" href="${folderUrl(f.key)}">
   ${folderSvg()}
   <span class="f-name">${esc(f.name)}</span>
   <span class="f-count">${plural(f.count)}</span>
@@ -136,7 +154,7 @@ export function renderHome(folders: Folder[], recent: PostRow[]): string {
   return layout(
     'English Notes',
     `<section class="hero">
-  <p class="hero-kicker">my learning journal</p>
+  <p class="hero-kicker">my learning journey</p>
   <h1>English Notes</h1>
 </section>
 <div class="section-head"><h2>Folders</h2></div>
@@ -151,7 +169,7 @@ export function renderFolder(folder: Folder, posts: PostRow[]): string {
   return layout(
     `${folder.name} – English Notes`,
     `<nav class="crumbs"><a href="/">Folders</a><span class="sep">/</span><span>${esc(folder.name)}</span></nav>
-<div class="folder-head" style="${colorVars(folder.key)}">${folderSvg(true)}<div><h1 class="page-title">${esc(folder.name)}</h1><p class="meta">${plural(folder.count)}</p></div></div>
+<div class="folder-head" data-folder="${esc(folder.key)}" style="${colorVars(folder.key)}">${folderSvg(true)}<div><h1 class="page-title">${esc(folder.name)}</h1><p class="meta">${plural(folder.count)}</p></div></div>
 <div class="post-list">${posts.map(postRow).join('\n')}</div>`,
     `Posts in ${folder.name}`,
     true,

@@ -10,3 +10,15 @@ CREATE TABLE IF NOT EXISTS posts (
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_posts_pub ON posts (published, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS folder_colors (
+  key   TEXT PRIMARY KEY,
+  color TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS templates (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  content    TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

@@ -1,5 +1,6 @@
 import { Editor } from '@tiptap/core';
-import { TextSelection } from '@tiptap/pm/state';
+import { AllSelection, TextSelection } from '@tiptap/pm/state';
+import { DOMSerializer } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import { TextStyleKit } from '@tiptap/extension-text-style';
 import TextAlign from '@tiptap/extension-text-align';
@@ -19,6 +20,7 @@ interface PostSummary { id: number; slug: string; title: string; category: strin
 interface Post extends PostSummary { excerpt: string; content: string }
 
 const app = document.getElementById('app')!;
+try { localStorage.setItem('owner', '1'); } catch { /* storage blocked */ } // lets the public site show the folder colour menu
 app.spellcheck = false; // no red squiggly underlines
 
 const esc = (s: string) =>
@@ -44,6 +46,7 @@ let currentEditor: Editor | null = null;
 let dirty = false;
 
 function destroyEditor() {
+  document.getElementById('ctx-menu')?.remove();
   currentEditor?.destroy();
   currentEditor = null;
   dirty = false;
@@ -158,6 +161,7 @@ const ICON = {
   image: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5L8 19"/>'),
   table: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>'),
   hr: svg('<path d="M3 12h18" stroke-width="2.4"/><path d="M8 6h8M8 18h8" opacity=".45"/>'),
+  template: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>'),
   draw: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
   clear: svg('<path d="M5 5h11M10.5 5v11"/><path d="m14 14 6 6M20 14l-6 6"/>'),
 };
@@ -204,7 +208,7 @@ function toolbarHtml() {
     <div class="tr">
       <span class="tg">${tb('alignLeft', alignIcon('left'), 'Align left (Ctrl+Shift+L)')}${tb('alignCenter', alignIcon('center'), 'Center (Ctrl+Shift+E)')}${tb('alignRight', alignIcon('right'), 'Align right (Ctrl+Shift+R)')}${tb('alignJustify', alignIcon('justify'), 'Justify (Ctrl+Shift+J) – click again to turn off')}</span>
       <span class="tg">${tb('bulletList', ICON.bullet, 'Bulleted list')}${tb('orderedList', ICON.ordered, 'Numbered list')}${tb('blockquote', ICON.quote, 'Quote')}</span>
-      <span class="tg">${tb('link', ICON.link, 'Insert / edit link')}${tb('image', ICON.image, 'Insert image')}${tb('table', ICON.table, 'Insert table')}${tb('hr', ICON.hr, 'Horizontal line')}${tb('draw', ICON.draw, 'Draw a diagram or sketch (Excalidraw)')}</span>
+      <span class="tg">${tb('link', ICON.link, 'Insert / edit link')}${tb('image', ICON.image, 'Insert image')}${tb('table', ICON.table, 'Insert table')}${tb('hr', ICON.hr, 'Horizontal line')}${tb('draw', ICON.draw, 'Draw a diagram or sketch (Excalidraw)')}${tb('templates', ICON.template, 'Templates: insert a saved layout, or save your selection as a template')}</span>
       <span class="tg">${tb('clear', ICON.clear, 'Clear formatting')}</span>
     </div>
     <div class="table-tools" id="table-tools">
@@ -234,12 +238,15 @@ function showEditor(post: Post | null) {
   destroyEditor();
   const p: Post = post ?? { id: 0, slug: '', title: '', category: '', excerpt: '', content: '', published: 0, created_at: '', updated_at: '' };
   let slugTouched = !!post;
+  let autoOn = true; // auto-save on/off (remembered)
+  try { autoOn = localStorage.getItem('autosave') !== 'off'; } catch { /* storage blocked */ }
 
   app.innerHTML = `
     <div class="a-bar">
       <a class="btn" href="#/">← Posts</a>
       <span class="grow"></span>
       <span class="status" id="status"></span>
+      <label class="auto-toggle" title="Saves your changes a few seconds after you stop typing"><input type="checkbox" id="autosave" ${autoOn ? 'checked' : ''}> Auto-save</label>
       ${post && p.published ? `<a class="btn" id="view" href="/post/${encodeURIComponent(p.slug)}" target="_blank">View</a>` : ''}
       ${post ? '<button class="btn danger" id="del">Delete</button>' : ''}
       <select id="published" title="Status">
@@ -265,7 +272,20 @@ function showEditor(post: Post | null) {
   const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const status = $('status');
   const setStatus = (msg: string, err = false) => { status.textContent = msg; status.className = 'status' + (err ? ' err' : ''); };
-  const markDirty = () => { if (!dirty) { dirty = true; setStatus('Unsaved changes'); } };
+  // ---- auto-save state (functions below are hoisted declarations)
+  let version = 0;                 // bumped on every edit
+  let busy = false;                // a save request is in flight
+  let savedPublished = !!p.published; // status as stored on the server: auto-save never changes it
+  let autoTimer: number | undefined;
+  let backupTimer: number | undefined;
+  const AUTOSAVE_MS = 2500;
+  const markDirty = () => {
+    version++;
+    dirty = true;
+    setStatus(autoOn ? 'Unsaved changes – auto-saving soon…' : 'Unsaved changes');
+    scheduleBackup();
+    scheduleAutosave();
+  };
 
   async function insertImages(files: File[]) {
     for (const f of files) {
@@ -297,8 +317,9 @@ function showEditor(post: Post | null) {
     editorProps: {
       // spellcheck/autocorrect off; data-* attributes also switch off Grammarly / LanguageTool-style extensions.
       attributes: { class: 'prose', spellcheck: 'false', autocorrect: 'off', autocapitalize: 'off', 'data-gramm': 'false', 'data-gramm_editor': 'false', 'data-enable-grammarly': 'false', 'data-lt-active': 'false' },
-      // Pasted text must not drag in the source page's fonts/sizes: the font only changes when you pick one.
+      // Text pasted from OTHER sites/apps must not drag in their fonts/sizes (copies from this editor are kept intact).
       transformPastedHTML: (html: string) => {
+        if (html.includes('data-pm-slice')) return html; // copied from this editor: keep fonts and sizes as they are
         const doc = new DOMParser().parseFromString(html, 'text/html');
         doc.body.querySelectorAll<HTMLElement>('[style]').forEach((el) => {
           el.style.removeProperty('font');
@@ -328,6 +349,25 @@ function showEditor(post: Post | null) {
 
   // ---- toolbar wiring
   const toolbar = $('toolbar');
+
+  // ---- right-click menu: the same controls as the toolbar, shown at the pointer
+  document.getElementById('ctx-menu')?.remove();
+  const menu = document.createElement('div');
+  menu.id = 'ctx-menu';
+  menu.className = 'ctx-menu';
+  toolbar.querySelectorAll(':scope > .tr').forEach((row) => menu.appendChild(row.cloneNode(true)));
+  menu.querySelector('[data-cmd=undo]')?.closest('.tg')?.remove(); // keep undo/redo on the toolbar only
+  menu.insertAdjacentHTML('beforeend', `
+    <div class="ctx-sep"></div>
+    <div class="ctx-list">
+      <button type="button" class="ctx-item" data-ctx="cut">Cut<kbd>Ctrl+X</kbd></button>
+      <button type="button" class="ctx-item" data-ctx="copy">Copy<kbd>Ctrl+C</kbd></button>
+      <button type="button" class="ctx-item" data-ctx="paste">Paste text<kbd>Ctrl+V</kbd></button>
+      <button type="button" class="ctx-item" data-ctx="selectAll">Select all<kbd>Ctrl+A</kbd></button>
+    </div>`);
+  document.body.appendChild(menu);
+  const roots: HTMLElement[] = [toolbar, menu];
+  const listen = (type: string, fn: (e: any) => void) => roots.forEach((r) => r.addEventListener(type, fn));
   const curAlign = (): string =>
     (editor.getAttributes('paragraph').textAlign || editor.getAttributes('heading').textAlign || 'left') as string;
   const toggleAlign = (a: string) => {
@@ -457,7 +497,8 @@ function showEditor(post: Post | null) {
   // After a formatting action, drop the highlight (collapse the selection to its end), like closing a Word menu.
   const deselect = () => {
     const sel = editor.state.selection;
-    if (sel instanceof TextSelection && !sel.empty) editor.chain().focus().setTextSelection(sel.to).run();
+    // TextSelection = mouse/shift selection, AllSelection = Ctrl+A. (Image/table-cell selections are left alone.)
+    if ((sel instanceof TextSelection || sel instanceof AllSelection) && !sel.empty) editor.chain().focus().setTextSelection(sel.to).run();
   };
   const KEEP_SELECTION = new Set(['draw', 'imgEdit', 'imgW25', 'imgW50', 'imgW75', 'imgW100', 'imgOrig', 'imgCrop', 'undo', 'redo', 'image', 'table', 'addColAfter', 'addRowAfter', 'deleteColumn', 'deleteRow', 'toggleHeaderRow', 'mergeOrSplit', 'deleteTable']);
   const run = (cmd: string) => {
@@ -467,15 +508,15 @@ function showEditor(post: Post | null) {
   };
 
   // Keep the editor selection when clicking toolbar buttons.
-  toolbar.addEventListener('mousedown', (e) => {
+  listen('mousedown', (e) => {
     if ((e.target as HTMLElement).closest('button')) e.preventDefault();
   });
   type Kind = 'text' | 'highlight';
   const lastColor: Record<Kind, string> = { text: '#c00000', highlight: '#ffff00' };
-  const closePalettes = () => toolbar.querySelectorAll('.palette.open').forEach((el) => el.classList.remove('open'));
+  const closePalettes = () => document.querySelectorAll('.palette.open').forEach((el) => el.classList.remove('open'));
   const applyColor = (kind: Kind, color: string) => {
     lastColor[kind] = color;
-    toolbar.querySelector<HTMLElement>(`[data-split=${kind}] .bar`)!.style.background = color;
+    document.querySelectorAll<HTMLElement>(`[data-split=${kind}] .bar`).forEach((b) => { b.style.background = color; });
     const c = editor.chain().focus();
     if (kind === 'text') c.setColor(color).run(); else c.setHighlight({ color }).run();
     deselect();
@@ -486,7 +527,7 @@ function showEditor(post: Post | null) {
     deselect();
   };
 
-  toolbar.addEventListener('click', (e) => {
+  listen('click', (e) => {
     const t = e.target as HTMLElement;
     const apply = t.closest<HTMLElement>('[data-apply]');
     if (apply) { closePalettes(); return applyColor(apply.dataset.apply as Kind, lastColor[apply.dataset.apply as Kind]); }
@@ -505,6 +546,7 @@ function showEditor(post: Post | null) {
     const more = t.closest<HTMLElement>('[data-more]');
     if (more) { more.parentElement!.querySelector<HTMLInputElement>('.more-input')!.click(); return; }
     const btn = t.closest('button[data-cmd]') as HTMLButtonElement | null;
+    if (btn && btn.dataset.cmd === 'templates') { openTemplates(btn); return; }
     if (btn) run(btn.dataset.cmd!);
   });
   const onDocClick = (e: MouseEvent) => {
@@ -512,7 +554,7 @@ function showEditor(post: Post | null) {
     if (!(e.target as HTMLElement).closest('.split')) closePalettes();
   };
   document.addEventListener('click', onDocClick);
-  toolbar.addEventListener('change', (e) => {
+  listen('change', (e) => {
     const t = e.target as HTMLSelectElement | HTMLInputElement;
     const c = editor.chain().focus();
     if (t instanceof HTMLSelectElement) {
@@ -554,24 +596,30 @@ function showEditor(post: Post | null) {
     link: () => editor.isActive('link'),
   };
   const syncToolbar = () => {
-    toolbar.querySelectorAll<HTMLButtonElement>('button[data-cmd]').forEach((b) => {
-      const f = toggles[b.dataset.cmd!];
-      if (f) b.classList.toggle('on', f());
-    });
+    roots.forEach((root) =>
+      root.querySelectorAll<HTMLButtonElement>('button[data-cmd]').forEach((b) => {
+        const f = toggles[b.dataset.cmd!];
+        if (f) b.classList.toggle('on', f());
+      }),
+    );
     const ts = editor.getAttributes('textStyle');
     const setSel = (name: string, value: string) => {
-      const sel = toolbar.querySelector<HTMLSelectElement>(`select[data-sel="${name}"]`)!;
-      sel.querySelector('option[data-temp]')?.remove();
-      if (![...sel.options].some((o) => o.value === value)) {
-        if (name === 'block' || !value) value = name === 'block' ? 'p' : '';
-        else { // an uncommon size/font: show exactly what is used
-          const o = document.createElement('option');
-          o.value = value; o.dataset.temp = '1';
-          o.textContent = name === 'size' ? parseFloat(value) + '' : value.split(',')[0].replace(/["']/g, '');
-          sel.appendChild(o);
+      roots.forEach((root) => {
+        const sel = root.querySelector<HTMLSelectElement>(`select[data-sel="${name}"]`);
+        if (!sel) return;
+        sel.querySelector('option[data-temp]')?.remove();
+        let v = value;
+        if (![...sel.options].some((o) => o.value === v)) {
+          if (name === 'block' || !v) v = name === 'block' ? 'p' : '';
+          else { // an uncommon size/font: show exactly what is used
+            const o = document.createElement('option');
+            o.value = v; o.dataset.temp = '1';
+            o.textContent = name === 'size' ? parseFloat(v) + '' : v.split(',')[0].replace(/["']/g, '');
+            sel.appendChild(o);
+          }
         }
-      }
-      sel.value = value;
+        sel.value = v;
+      });
     };
     let block = 'p';
     for (let l = 1; l <= 4; l++) if (editor.isActive('heading', { level: l })) block = String(l);
@@ -586,6 +634,161 @@ function showEditor(post: Post | null) {
   };
   editor.on('transaction', syncToolbar);
   syncToolbar();
+
+  const hideMenu = () => {
+    if (!menu.classList.contains('open')) return; // must not touch the toolbar's own colour palettes
+    menu.classList.remove('open');
+    menu.querySelectorAll('.palette.open').forEach((el) => el.classList.remove('open'));
+  };
+  const showMenu = (x: number, y: number) => {
+    syncToolbar();
+    menu.classList.add('open');
+    menu.style.left = '0px'; menu.style.top = '0px';
+    const w = menu.offsetWidth, h = menu.offsetHeight;
+    menu.style.left = Math.max(8, Math.min(x, window.innerWidth - w - 8)) + 'px';
+    menu.style.top = Math.max(8, Math.min(y, window.innerHeight - h - 8)) + 'px';
+  };
+  editor.view.dom.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    // right-clicking outside the current selection moves the caret there (like Word)
+    const hit = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
+    const { from, to } = editor.state.selection;
+    if (hit && editor.state.selection instanceof TextSelection && (hit.pos < from || hit.pos > to)) editor.commands.setTextSelection(hit.pos);
+    showMenu(e.clientX, e.clientY);
+  });
+  menu.addEventListener('click', async (e) => {
+    const t = e.target as HTMLElement;
+    const act = t.closest<HTMLElement>('[data-ctx]')?.dataset.ctx;
+    if (act) {
+      hideMenu();
+      editor.view.focus();
+      if (act === 'cut' || act === 'copy') document.execCommand(act);
+      else if (act === 'selectAll') editor.commands.selectAll();
+      else if (act === 'paste') {
+        try {
+          const text = await navigator.clipboard.readText();
+          const paras = text.split(/\r?\n/).map((l) => ({ type: 'paragraph', content: l ? [{ type: 'text', text: l }] : [] }));
+          editor.chain().focus().insertContent(paras.length > 1 ? paras : text).run();
+        } catch {
+          setStatus('Your browser blocked clipboard access – press Ctrl+V to paste instead.', true);
+        }
+      }
+      return;
+    }
+    if (t.closest('[data-open], [data-more]')) return; // opening a colour palette keeps the menu open
+    if (t.closest('button')) hideMenu();
+  });
+  menu.addEventListener('change', hideMenu);
+  const onMenuOutside = (e: MouseEvent) => {
+    if (!document.getElementById('ctx-menu')) { document.removeEventListener('mousedown', onMenuOutside); return; }
+    if (!menu.contains(e.target as Node)) hideMenu();
+  };
+  document.addEventListener('mousedown', onMenuOutside);
+  window.addEventListener('blur', hideMenu);
+  window.addEventListener('resize', hideMenu);
+
+  // ---- templates: saved layouts (headings, colours, tables…) you can insert in any post
+  interface Tpl { id: number; name: string; content: string }
+  let tplPanel: HTMLElement | null = null;
+  const closeTemplates = () => { tplPanel?.remove(); tplPanel = null; };
+  const peek = (html: string) => {
+    const d = document.createElement('div');
+    d.innerHTML = html.replace(/<\/(p|h[1-6]|li|div|td|th|blockquote)>/g, ' </$1>'); // keep words of separate blocks apart
+    return (d.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 64);
+  };
+  const selectionHtml = (): string => {
+    const sel = editor.state.selection;
+    if (sel.empty) return '';
+    const frag = DOMSerializer.fromSchema(editor.schema).serializeFragment(sel.content().content);
+    const box = document.createElement('div');
+    box.appendChild(frag);
+    return box.innerHTML;
+  };
+
+  async function openTemplates(anchor: HTMLElement) {
+    if (tplPanel) { closeTemplates(); return; }
+    const rect = anchor.getBoundingClientRect(); // read now: the right-click menu closes right after this click
+    let list: Tpl[] = [];
+    try {
+      list = await api<Tpl[]>('/api/templates');
+    } catch (e) {
+      setStatus((e as Error).message, true);
+      return;
+    }
+    const panel = document.createElement('div');
+    panel.id = 'tpl-panel';
+    panel.className = 'tpl-panel';
+    const draw = () => {
+      panel.innerHTML = `
+        <div class="tpl-head">Templates</div>
+        <div class="tpl-list">${
+          list.length
+            ? list.map((t) => `<div class="tpl-row" data-id="${t.id}"><button type="button" class="tpl-use" title="Insert into the post"><b>${esc(t.name)}</b><small>${esc(peek(t.content))}</small></button><button type="button" class="tpl-act" data-a="rename" title="Rename">✎</button><button type="button" class="tpl-act" data-a="update" title="Replace this template with the current selection">↻</button><button type="button" class="tpl-act" data-a="delete" title="Delete">✕</button></div>`).join('')
+            : '<p class="tpl-empty">No templates yet.<br>Format some text the way you like (headings, colours, tables…), select it, then click “Save selection as template”.</p>'
+        }</div>
+        <button type="button" class="tpl-save">＋ Save selection as template</button>`;
+    };
+    draw();
+    document.body.appendChild(panel);
+    tplPanel = panel;
+    const w = panel.offsetWidth, h = panel.offsetHeight;
+    panel.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - w - 8)) + 'px';
+    panel.style.top = Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - h - 8)) + 'px';
+
+    panel.addEventListener('mousedown', (e) => { if ((e.target as HTMLElement).closest('button')) e.preventDefault(); }); // keep the editor selection
+    panel.addEventListener('click', async (e) => {
+      const t = e.target as HTMLElement;
+      const row = t.closest<HTMLElement>('.tpl-row');
+      const tpl = row ? list.find((x) => x.id === Number(row.dataset.id)) : undefined;
+      try {
+        if (t.closest('.tpl-save')) {
+          let html = selectionHtml();
+          if (!html) {
+            if (!confirm('Nothing is selected. Save the whole post as a template?')) return;
+            html = editor.getHTML();
+          }
+          const first = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+          const name = window.prompt('Template name:', first || 'My template');
+          if (!name || !name.trim()) return;
+          await api('/api/templates', { method: 'POST', body: JSON.stringify({ name: name.trim(), content: html }) });
+          list = await api<Tpl[]>('/api/templates');
+          draw();
+          setStatus('Template saved');
+        } else if (tpl && t.closest('.tpl-use')) {
+          const sel = editor.state.selection;
+          closeTemplates();
+          editor.chain().focus().insertContentAt(sel.empty ? sel.from : sel.to, tpl.content).run();
+        } else if (tpl && t.closest('[data-a=rename]')) {
+          const name = window.prompt('Rename template:', tpl.name);
+          if (!name || !name.trim()) return;
+          await api(`/api/templates/${tpl.id}`, { method: 'PUT', body: JSON.stringify({ name: name.trim() }) });
+          tpl.name = name.trim();
+          draw();
+        } else if (tpl && t.closest('[data-a=update]')) {
+          const html = selectionHtml();
+          if (!html) { setStatus('Select the text you want the template to become first.', true); return; }
+          if (!confirm(`Replace the content of “${tpl.name}” with your current selection?`)) return;
+          await api(`/api/templates/${tpl.id}`, { method: 'PUT', body: JSON.stringify({ name: tpl.name, content: html }) });
+          tpl.content = html;
+          draw();
+          setStatus('Template updated');
+        } else if (tpl && t.closest('[data-a=delete]')) {
+          if (!confirm(`Delete template “${tpl.name}”?`)) return;
+          await api(`/api/templates/${tpl.id}`, { method: 'DELETE' });
+          list = list.filter((x) => x.id !== tpl.id);
+          draw();
+        }
+      } catch (err) {
+        setStatus((err as Error).message, true);
+      }
+    });
+  }
+  const onTplOutside = (e: MouseEvent) => {
+    if (!document.getElementById('editor')) { document.removeEventListener('mousedown', onTplOutside); closeTemplates(); return; }
+    const t = e.target as HTMLElement;
+    if (tplPanel && !tplPanel.contains(t) && !t.closest('[data-cmd=templates]')) closeTemplates();
+  };
+  document.addEventListener('mousedown', onTplOutside);
 
   // ---- category: type freely, or open the arrow to pick one of DEFAULT_CATEGORIES
   const catEl = $<HTMLInputElement>('category');
@@ -627,10 +830,14 @@ function showEditor(post: Post | null) {
   slugEl.addEventListener('input', () => { slugTouched = true; markDirty(); });
   for (const id of ['category', 'excerpt', 'published']) $(id).addEventListener('input', markDirty);
 
-  // ---- save / delete
+  // ---- save / auto-save / recovery
   const saveBtn = $<HTMLButtonElement>('save');
-  async function save() {
-    const body = {
+  const inEditor = () => !!document.getElementById('editor');
+  const draftKey = () => `draft:${p.id || 'new'}`;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  function collect() {
+    return {
       title: titleEl.value.trim(),
       slug: slugify(slugEl.value) || slugify(titleEl.value),
       category: $<HTMLInputElement>('category').value,
@@ -638,26 +845,123 @@ function showEditor(post: Post | null) {
       content: editor.getHTML(),
       published: $<HTMLSelectElement>('published').value === '1',
     };
-    if (!body.title) { setStatus('Please enter a title', true); titleEl.focus(); return; }
-    saveBtn.disabled = true;
-    setStatus('Saving…');
+  }
+
+  // Local safety copy (this browser only): survives a crash/closed tab even if the server can't be reached.
+  function scheduleBackup() {
+    clearTimeout(backupTimer);
+    backupTimer = window.setTimeout(writeBackup, 700);
+  }
+  function writeBackup() {
+    if (!inEditor() || !dirty) return;
+    try { localStorage.setItem(draftKey(), JSON.stringify({ ...collect(), at: Date.now() })); } catch { /* storage full/blocked */ }
+  }
+  function clearBackup(key = draftKey()) {
+    try { localStorage.removeItem(key); } catch { /* ignore */ }
+  }
+
+  function scheduleAutosave() {
+    clearTimeout(autoTimer);
+    if (autoOn) autoTimer = window.setTimeout(() => autoSave(), AUTOSAVE_MS);
+  }
+  async function autoSave(keepalive = false) {
+    clearTimeout(autoTimer);
+    if (!autoOn || !dirty || !inEditor()) return;
+    if (busy) { scheduleAutosave(); return; }
+    const body = collect();
+    if (!body.title) { setStatus('Unsaved – add a title to turn on auto-save'); return; }
+    await persist(body, true, keepalive);
+  }
+
+  async function persist(body: ReturnType<typeof collect>, auto: boolean, keepalive = false) {
+    busy = true;
+    const v = version;
+    if (!auto) saveBtn.disabled = true;
+    setStatus(auto ? 'Auto-saving…' : 'Saving…');
+    // Auto-save keeps the published/draft state that is already stored, so it can never publish by accident.
+    const payload = auto ? { ...body, published: savedPublished } : body;
+    const json = JSON.stringify(payload);
     try {
-      slugEl.value = body.slug;
+      if (!auto) slugEl.value = body.slug;
+      const opts = keepalive && json.length < 60000 ? { keepalive: true } : {};
       if (p.id) {
-        await api(`/api/posts/${p.id}`, { method: 'PUT', body: JSON.stringify(body) });
+        await api(`/api/posts/${p.id}`, { method: 'PUT', body: json, ...opts });
       } else {
-        const r = await api<{ id: number }>('/api/posts', { method: 'POST', body: JSON.stringify(body) });
+        const r = await api<{ id: number }>('/api/posts', { method: 'POST', body: json, ...opts });
+        clearBackup('draft:new');
         p.id = r.id;
         history.replaceState(null, '', `#/edit/${p.id}`); // no hashchange event fired
       }
-      dirty = false;
-      setStatus('Saved ' + new Date().toLocaleTimeString());
+      savedPublished = payload.published;
+      const edited = version !== v; // typed more while this request was running
+      if (!edited) { dirty = false; clearBackup(); } else { scheduleAutosave(); writeBackup(); }
+      const t = new Date().toLocaleTimeString();
+      const pending = auto && $<HTMLSelectElement>('published').value === '1' !== savedPublished;
+      setStatus(edited ? 'Unsaved changes – auto-saving soon…' : (auto ? `Auto-saved ${t}` : `Saved ${t}`) + (pending ? ' (click Save to apply the status change)' : ''));
     } catch (e) {
-      setStatus((e as Error).message, true);
+      const offline = e instanceof TypeError; // network failure
+      setStatus(auto ? `Auto-save failed${offline ? ' (offline?)' : ': ' + (e as Error).message} – your text is kept on this device` : (e as Error).message, true);
+      if (auto && offline) autoTimer = window.setTimeout(() => autoSave(), 8000);
     } finally {
+      busy = false;
       saveBtn.disabled = false;
     }
   }
+
+  async function save() {
+    const body = collect();
+    if (!body.title) { setStatus('Please enter a title', true); titleEl.focus(); return; }
+    clearTimeout(autoTimer);
+    while (busy) await sleep(100);
+    await persist(collect(), false);
+  }
+
+  // Last chance when the tab is hidden/closed: save now (keepalive lets the request finish) + local copy.
+  const flush = () => {
+    if (!inEditor()) { document.removeEventListener('visibilitychange', flush); window.removeEventListener('pagehide', flush); return; }
+    writeBackup();
+    if (dirty && autoOn && !busy) autoSave(true);
+  };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+  window.addEventListener('pagehide', flush);
+
+  $<HTMLInputElement>('autosave').addEventListener('change', (e) => {
+    autoOn = (e.target as HTMLInputElement).checked;
+    try { localStorage.setItem('autosave', autoOn ? 'on' : 'off'); } catch { /* ignore */ }
+    if (autoOn) { if (dirty) scheduleAutosave(); } else clearTimeout(autoTimer);
+    setStatus(dirty ? (autoOn ? 'Unsaved changes – auto-saving soon…' : 'Unsaved changes') : '');
+  });
+
+  // Offer to restore a local copy that never reached the server (crash, closed tab, offline).
+  (function checkRecovery() {
+    let d: any = null;
+    try { d = JSON.parse(localStorage.getItem(draftKey()) || 'null'); } catch { d = null; }
+    if (!d || typeof d.content !== 'string') return;
+    const serverTime = p.updated_at ? Date.parse(p.updated_at.replace(' ', 'T') + 'Z') : 0;
+    const differs = d.title !== p.title || d.content !== p.content || d.category !== p.category || d.excerpt !== p.excerpt || d.slug !== p.slug;
+    if (!differs || (p.id && d.at <= serverTime) || (!p.id && !d.title && !d.content.replace(/<[^>]*>/g, '').trim())) { clearBackup(); return; }
+    const bar = document.createElement('div');
+    bar.className = 'recover';
+    bar.innerHTML = `<span>Unsaved changes from <b>${new Date(d.at).toLocaleString()}</b> were found on this device.</span><button type="button" class="btn primary" data-r="restore">Restore</button><button type="button" class="btn" data-r="discard">Discard</button>`;
+    document.querySelector('.a-main')!.prepend(bar);
+    bar.addEventListener('click', (e) => {
+      const act = (e.target as HTMLElement).closest<HTMLElement>('[data-r]')?.dataset.r;
+      if (!act) return;
+      if (act === 'restore') {
+        titleEl.value = d.title ?? '';
+        slugEl.value = d.slug ?? '';
+        slugTouched = true;
+        $<HTMLInputElement>('category').value = d.category ?? '';
+        $<HTMLTextAreaElement>('excerpt').value = d.excerpt ?? '';
+        editor.commands.setContent(d.content);
+        markDirty();
+      } else {
+        clearBackup();
+      }
+      bar.remove();
+    });
+  })();
+
   saveBtn.addEventListener('click', save);
   document.addEventListener('keydown', onKey);
   function onKey(e: KeyboardEvent) {
@@ -665,6 +969,8 @@ function showEditor(post: Post | null) {
     if (document.querySelector('.dr-overlay')) return; // the drawing tool handles its own keys
     if (e.key === 'Escape') {
       closePalettes();
+      hideMenu();
+      closeTemplates();
       const a = document.activeElement;
       const typing = a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement; // title, slug, category…
       if (!typing) deselect();

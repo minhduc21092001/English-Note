@@ -1,4 +1,4 @@
-import { buildFolders, categoryKey, renderFolder, renderHome, renderNotFound, renderPost } from './render';
+import { buildFolders, categoryKey, renderFolder, renderHome, renderNotFound, renderPost, setFolderColors } from './render';
 import type { Env, PostRow } from './types';
 
 const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
@@ -24,6 +24,8 @@ function ensureSchema(db: D1Database): Promise<unknown> {
         "CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL, category TEXT NOT NULL DEFAULT '', excerpt TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', published INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')))",
       ),
       db.prepare('CREATE INDEX IF NOT EXISTS idx_posts_pub ON posts (published, created_at DESC)'),
+      db.prepare('CREATE TABLE IF NOT EXISTS folder_colors (key TEXT PRIMARY KEY, color TEXT NOT NULL)'),
+      db.prepare("CREATE TABLE IF NOT EXISTS templates (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))"),
     ])
     .catch((e) => {
       schemaReady = null;
@@ -65,6 +67,7 @@ export default {
               "SELECT id, slug, title, category, excerpt, published, created_at, updated_at, '' AS content FROM posts WHERE published = 1 ORDER BY created_at DESC LIMIT 1000",
             )
             .all<PostRow>();
+          await loadFolderColors(env.DB);
           if (pathname === '/') return html(renderHome(buildFolders(results), results.slice(0, 6)));
 
           const key = decodeURIComponent(pathname.slice('/folder/'.length).replace(/\/$/, ''));
@@ -78,6 +81,7 @@ export default {
             .prepare('SELECT * FROM posts WHERE slug = ? AND published = 1')
             .bind(decodeURIComponent(m[1]))
             .first<PostRow>();
+          if (post) await loadFolderColors(env.DB);
           return post ? html(renderPost(post)) : html(renderNotFound(), 404);
         }
       }
@@ -93,9 +97,61 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+async function loadFolderColors(db: D1Database): Promise<void> {
+  const { results } = await db.prepare('SELECT key, color FROM folder_colors').all<{ key: string; color: string }>();
+  setFolderColors(Object.fromEntries(results.map((r) => [r.key, r.color])));
+}
+
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
   const { pathname } = url;
   const method = request.method;
+
+  if (pathname === '/api/templates' && method === 'GET') {
+    const { results } = await env.DB.prepare('SELECT id, name, content FROM templates ORDER BY name COLLATE NOCASE').all();
+    return json(results);
+  }
+  if (pathname === '/api/templates' && method === 'POST') {
+    const b = await readJson<{ name?: string; content?: string }>(request);
+    const name = (typeof b?.name === 'string' ? b.name : '').trim().slice(0, 80);
+    const content = typeof b?.content === 'string' ? b.content : '';
+    if (!name) return json({ error: 'Template name is required' }, 400);
+    if (!content.trim()) return json({ error: 'Template is empty' }, 400);
+    if (content.length > 500_000) return json({ error: 'Template is too large' }, 400);
+    const r = await env.DB.prepare('INSERT INTO templates (name, content) VALUES (?, ?)').bind(name, content).run();
+    return json({ id: r.meta.last_row_id }, 201);
+  }
+  const tm = pathname.match(/^\/api\/templates\/(\d+)$/);
+  if (tm && method === 'PUT') {
+    const b = await readJson<{ name?: string; content?: string }>(request);
+    const name = (typeof b?.name === 'string' ? b.name : '').trim().slice(0, 80);
+    if (!name) return json({ error: 'Template name is required' }, 400);
+    if (typeof b?.content === 'string' && b.content.trim()) {
+      await env.DB.prepare('UPDATE templates SET name = ?, content = ? WHERE id = ?').bind(name, b.content, Number(tm[1])).run();
+    } else {
+      await env.DB.prepare('UPDATE templates SET name = ? WHERE id = ?').bind(name, Number(tm[1])).run();
+    }
+    return json({ ok: true });
+  }
+  if (tm && method === 'DELETE') {
+    await env.DB.prepare('DELETE FROM templates WHERE id = ?').bind(Number(tm[1])).run();
+    return json({ ok: true });
+  }
+
+  const fc = pathname.match(/^\/api\/folder-colors\/(.+)$/);
+  if (fc && method === 'PUT') {
+    const key = decodeURIComponent(fc[1]);
+    const body = await readJson<{ color?: string }>(request);
+    const color = typeof body?.color === 'string' ? body.color.trim() : '';
+    if (key.length > 100) return json({ error: 'Bad folder' }, 400);
+    if (color === '') {
+      await env.DB.prepare('DELETE FROM folder_colors WHERE key = ?').bind(key).run();
+    } else if (/^#[0-9a-fA-F]{6}$/.test(color)) {
+      await env.DB.prepare('INSERT INTO folder_colors (key, color) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET color = excluded.color').bind(key, color.toLowerCase()).run();
+    } else {
+      return json({ error: 'Color must look like #a1b2c3' }, 400);
+    }
+    return json({ ok: true });
+  }
 
   if (pathname === '/api/posts' && method === 'GET') {
     const { results } = await env.DB

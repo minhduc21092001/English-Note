@@ -12,7 +12,8 @@ body { background: #f3f0ea; }
 .btn.danger { color: #b42318; }
 .btn:disabled { opacity: .55; cursor: default; }
 
-.a-main { max-width: 960px; margin: 0 auto; padding: 24px 20px 80px; }
+/* Same width as the published page (.wrap-wide = 1180px incl. 22px side padding), so the editor shows what readers see. */
+.a-main { max-width: 1180px; margin: 0 auto; padding: 24px 22px 80px; }
 
 
 input[type=text], input[type=password], textarea, select { font: inherit; font-size: .95rem; padding: 8px 10px; border: 1px solid #d8d2c7; border-radius: 8px; background: #fff; color: var(--ink); }
@@ -69,7 +70,7 @@ textarea { resize: vertical; min-height: 60px; }
 
 .editor-area { min-height: 420px; cursor: text; }
 /* Padding lives on .ProseMirror so every click/drag stays inside the editable area. */
-.editor-area .ProseMirror { outline: none; min-height: 420px; padding: 28px 36px; border-radius: 0 0 12px 12px; }
+.editor-area .ProseMirror { outline: none; min-height: 420px; padding: 48px 64px 56px; border-radius: 0 0 12px 12px; }
 .editor-area .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: #a8a296; float: left; height: 0; pointer-events: none; }
 .editor-area .ProseMirror img.ProseMirror-selectednode, .editor-area .ProseMirror .selectedCell { outline: 2px solid var(--accent); }
 .editor-area .selectedCell { background: var(--accent-soft); }
@@ -82,7 +83,7 @@ textarea { resize: vertical; min-height: 60px; }
 
 @media (max-width: 640px) {
   .meta-grid { grid-template-columns: 1fr; }
-  .editor-area .ProseMirror { padding: 18px; }
+  .editor-area .ProseMirror { padding: 24px 20px 28px; }
   .toolbar { top: 0; position: static; }
 }
 
